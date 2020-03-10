@@ -1,15 +1,16 @@
+const path = require('path');
+const fg = require('fast-glob');
+const chalk = require('chalk');
 const rollup = require('rollup');
 const babel = require('rollup-plugin-babel');
-const fg = require('fast-glob');
-const path = require('path');
 const terser = require("rollup-plugin-terser");
-const commonjs = require("rollup-plugin-commonjs");
+const commonjs = require("@rollup/plugin-commonjs");
 const resolve = require('@rollup/plugin-node-resolve');
-const chalk = require('chalk');
+const browserSync = require('browser-sync');
+const livereload = require('livereload')
+const greenBright = chalk.greenBright;
+const red = chalk.red;
 const log = console.log;
-const gulp = require('gulp');
-
-let cacheArray = []; // implement separated cache.
 
 const rollupConfig = {
     input: {
@@ -21,18 +22,30 @@ const rollupConfig = {
             }),
             resolve(),
             commonjs(),
-            //terser.terser()
+            terser.terser()
         ]
     },
     output: {
         format: 'umd',
         name: 'FIAP',            
         banner: banner(),
-        //sourcemap: 'inline'
+        sourcemap: 'inline',
+        indent: false
     },
     watch: {
         exclude: 'node_modules/**'
     }
+}
+
+function watchBrowserSync(cb) {
+    browserSync.init({ server: './dist' });
+    watchJs().then(cb);
+}
+
+function watchLiveReload() {
+    const server = livereload.createServer();
+    server.watch(path.join(__dirname, '../dist/src'));
+    watchJS().then(cb);
 }
 
 function banner() {
@@ -44,42 +57,37 @@ async function getJSFiles() {
     return glob;
 }
 
-async function build(cb) {
+async function build() {
     const files = await getJSFiles();
     await Promise.all(files.map(async(file) => {
-        const input = Object.assign({ cache: buildCache, input: file }, rollupConfig.input);
+        const input = Object.assign({ input: file }, rollupConfig.input);
         const output = Object.assign({ file: path.join('./dist', file) }, rollupConfig.output);    
         const bundle = await rollup.rollup(input);
-        buildCache = bundle.cache;
-        return await bundle.write(output);
+        await bundle.write(output);
     }));
-    cb();
 }
 
-async function watch(cb) {
-    const cyan = chalk.cyan;
-    const greenBright = chalk.greenBright;
-    const red = chalk.red;
-    
+async function watchJS() {
     const files = await getJSFiles();
+
     const watchOptions = files.map((file) => {
-        const input = Object.assign({ cache: buildCache, input: file }, rollupConfig.input);
+        const input = Object.assign({ input: file }, rollupConfig.input);
         const output = Object.assign({ file: path.join('./dist', file) }, rollupConfig.output);
         const watch = rollupConfig.watch;
         return {...input,output, watch}
     })
 
     const watcher = await rollup.watch(watchOptions);
-    buildCache = watcher.cache;
-
-    log(`${greenBright('Starting bundles...')}`);
+    let totalDuration = 0;
 
     watcher.on('event', (e) => {
         if(e.code === 'BUNDLE_END') {
-            log(`${cyan('Bundle completed:')}${e.input}`);
+            totalDuration += e.duration; 
         }
         if(e.code === 'END') {
             log(`${greenBright('All bundles completed...')}`)
+            log(totalDuration);
+            totalDuration = 0;
         }
         if(e.code === 'ERROR') {
             log(`${red('ERROR: ')}${e.error}`)
@@ -94,12 +102,5 @@ async function watch(cb) {
     });
 }
 
-
-// async function watch() {
-//     gulp.watch('./src/**/*.js', (a) => {
-//         log('hello world', a);
-//     });
-// }
-
 exports.build = build;
-exports.watch = watch;
+exports.watch = watchLiveReload;
